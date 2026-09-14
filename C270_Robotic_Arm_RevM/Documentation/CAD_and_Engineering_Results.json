@@ -1,0 +1,695 @@
+{
+  "checks": {
+    "CurvedArm_SG90_TiltHolder one valid solid": {
+      "pass_check": true,
+      "value": null
+    },
+    "SG90_RetainingCap one valid solid": {
+      "pass_check": true,
+      "value": null
+    },
+    "Logitech_C270_ScrewlessCradle one valid solid": {
+      "pass_check": true,
+      "value": null
+    },
+    "PanServo_StabilityBase one valid solid": {
+      "pass_check": true,
+      "value": null
+    },
+    "STEP C270_PanTilt_Full_Assembly_With_Servos.step": {
+      "pass_check": true,
+      "value": null
+    },
+    "STEP C270_PanTilt_Printable_Assembly.step": {
+      "pass_check": true,
+      "value": null
+    },
+    "STEP CurvedArm_SG90_TiltHolder.step": {
+      "pass_check": true,
+      "value": null
+    },
+    "STEP Logitech_C270_ScrewlessCradle.step": {
+      "pass_check": true,
+      "value": null
+    },
+    "STEP PanServo_StabilityBase.step": {
+      "pass_check": true,
+      "value": null
+    },
+    "STEP SG90_RetainingCap.step": {
+      "pass_check": true,
+      "value": null
+    },
+    "STEP Logitech_C270_Visual_Reference.step": {
+      "pass_check": true,
+      "value": null
+    },
+    "STEP SG90_Visual_Reference.step": {
+      "pass_check": true,
+      "value": null
+    },
+    "27 x 15 mm rectangular cap opening": {
+      "pass_check": true,
+      "value": 0
+    },
+    "opening to screw hole web >= 2 mm": {
+      "pass_check": true,
+      "value": 2.3
+    },
+    "new screw pattern 34 x 17 mm": {
+      "pass_check": true,
+      "value": null
+    },
+    "cap hole -17 85.5": {
+      "pass_check": true,
+      "value": null
+    },
+    "holder pilot -17 85.5": {
+      "pass_check": true,
+      "value": null
+    },
+    "3 mm engagement material -17 85.5": {
+      "pass_check": true,
+      "value": null
+    },
+    "cap hole -17 102.5": {
+      "pass_check": true,
+      "value": null
+    },
+    "holder pilot -17 102.5": {
+      "pass_check": true,
+      "value": null
+    },
+    "3 mm engagement material -17 102.5": {
+      "pass_check": true,
+      "value": null
+    },
+    "cap hole 17 85.5": {
+      "pass_check": true,
+      "value": null
+    },
+    "holder pilot 17 85.5": {
+      "pass_check": true,
+      "value": null
+    },
+    "3 mm engagement material 17 85.5": {
+      "pass_check": true,
+      "value": null
+    },
+    "cap hole 17 102.5": {
+      "pass_check": true,
+      "value": null
+    },
+    "holder pilot 17 102.5": {
+      "pass_check": true,
+      "value": null
+    },
+    "3 mm engagement material 17 102.5": {
+      "pass_check": true,
+      "value": null
+    },
+    "pan stock screw and tool corridor": {
+      "pass_check": true,
+      "value": null
+    },
+    "tilt stock screw and tool corridor": {
+      "pass_check": true,
+      "value": null
+    },
+    "pan recessed screw seat -7": {
+      "pass_check": true,
+      "value": null
+    },
+    "pan recessed screw seat 7": {
+      "pass_check": true,
+      "value": null
+    },
+    "tilt recessed screw seat -7": {
+      "pass_check": true,
+      "value": null
+    },
+    "tilt recessed screw seat 7": {
+      "pass_check": true,
+      "value": null
+    },
+    "upper servo side wire exit -22": {
+      "pass_check": true,
+      "value": null
+    },
+    "upper servo side wire exit 11.6": {
+      "pass_check": true,
+      "value": null
+    },
+    "base side wire exit -19.4": {
+      "pass_check": true,
+      "value": null
+    },
+    "base side wire exit 11.6": {
+      "pass_check": true,
+      "value": null
+    },
+    "rear USB central opening stays unobstructed": {
+      "pass_check": true,
+      "value": null
+    },
+    "cap against servo": {
+      "pass_check": true,
+      "value": 0
+    },
+    "arm against tilt servo": {
+      "pass_check": true,
+      "value": 0
+    },
+    "cap against arm": {
+      "pass_check": true,
+      "value": 0
+    },
+    "base against pan servo": {
+      "pass_check": true,
+      "value": 0
+    },
+    "arm against pan horn": {
+      "pass_check": true,
+      "value": 0
+    },
+    "webcam clip against cradle": {
+      "pass_check": true,
+      "value": 0
+    },
+    "webcam only intended flexible grip preload": {
+      "pass_check": true,
+      "value": 2.786229
+    },
+    "continuous upper assembly axial separation >= 2 mm": {
+      "pass_check": true,
+      "value": 2.0
+    },
+    "continuous moving assembly separation above base": {
+      "pass_check": true,
+      "value": 52.482
+    },
+    "tilt -45 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt -40 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt -35 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt -30 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt -25 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt -20 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt -15 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt -10 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt -5 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt +0 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt +5 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt +10 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt +15 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt +20 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt +25 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt +30 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt +35 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt +40 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt +45 deg solids cable horn clearance": {
+      "pass_check": true,
+      "value": [
+        0,
+        0,
+        0,
+        2.173
+      ]
+    },
+    "tilt changes camera elevation by 90 degrees": {
+      "pass_check": true,
+      "value": null
+    },
+    "pan and tilt shaft directions perpendicular": {
+      "pass_check": true,
+      "value": null
+    }
+  },
+  "motion_samples": [
+    {
+      "tilt_deg": -45,
+      "collision_mm3": 0,
+      "clearance_mm": 2.1731313812100708,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.7071067811865476,
+        0,
+        0.7071067811865476
+      ]
+    },
+    {
+      "tilt_deg": -40,
+      "collision_mm3": 0,
+      "clearance_mm": 2.1731313812100703,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.766044443118978,
+        0,
+        0.6427876096865393
+      ]
+    },
+    {
+      "tilt_deg": -35,
+      "collision_mm3": 0,
+      "clearance_mm": 2.1731313812100694,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.8191520442889918,
+        0,
+        0.573576436351046
+      ]
+    },
+    {
+      "tilt_deg": -30,
+      "collision_mm3": 0,
+      "clearance_mm": 2.1731313812100703,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.8660254037844387,
+        0,
+        0.49999999999999994
+      ]
+    },
+    {
+      "tilt_deg": -25,
+      "collision_mm3": 0,
+      "clearance_mm": 2.173131381210069,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.9063077870366499,
+        0,
+        0.42261826174069944
+      ]
+    },
+    {
+      "tilt_deg": -20,
+      "collision_mm3": 0,
+      "clearance_mm": 2.173131381210072,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.9396926207859084,
+        0,
+        0.3420201433256687
+      ]
+    },
+    {
+      "tilt_deg": -15,
+      "collision_mm3": 0,
+      "clearance_mm": 2.1731313812100694,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.9659258262890683,
+        0,
+        0.25881904510252074
+      ]
+    },
+    {
+      "tilt_deg": -10,
+      "collision_mm3": 0,
+      "clearance_mm": 2.1731313812100694,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.984807753012208,
+        0,
+        0.17364817766693033
+      ]
+    },
+    {
+      "tilt_deg": -5,
+      "collision_mm3": 0,
+      "clearance_mm": 2.173131381210068,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.9961946980917455,
+        0,
+        0.08715574274765817
+      ]
+    },
+    {
+      "tilt_deg": 0,
+      "collision_mm3": 0,
+      "clearance_mm": 2.1731313812100703,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        1.0,
+        0,
+        0.0
+      ]
+    },
+    {
+      "tilt_deg": 5,
+      "collision_mm3": 0,
+      "clearance_mm": 2.173131381210068,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.9961946980917455,
+        0,
+        -0.08715574274765817
+      ]
+    },
+    {
+      "tilt_deg": 10,
+      "collision_mm3": 0,
+      "clearance_mm": 2.1731313812100694,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.984807753012208,
+        0,
+        -0.17364817766693033
+      ]
+    },
+    {
+      "tilt_deg": 15,
+      "collision_mm3": 0,
+      "clearance_mm": 2.173131381210071,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.9659258262890683,
+        0,
+        -0.25881904510252074
+      ]
+    },
+    {
+      "tilt_deg": 20,
+      "collision_mm3": 0,
+      "clearance_mm": 2.17313138121007,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.9396926207859084,
+        0,
+        -0.3420201433256687
+      ]
+    },
+    {
+      "tilt_deg": 25,
+      "collision_mm3": 0,
+      "clearance_mm": 2.1731313812100694,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.9063077870366499,
+        0,
+        -0.42261826174069944
+      ]
+    },
+    {
+      "tilt_deg": 30,
+      "collision_mm3": 0,
+      "clearance_mm": 2.1731313812100694,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.8660254037844387,
+        0,
+        -0.49999999999999994
+      ]
+    },
+    {
+      "tilt_deg": 35,
+      "collision_mm3": 0,
+      "clearance_mm": 2.1731313812100717,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.8191520442889918,
+        0,
+        -0.573576436351046
+      ]
+    },
+    {
+      "tilt_deg": 40,
+      "collision_mm3": 0,
+      "clearance_mm": 2.1731313812100703,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.766044443118978,
+        0,
+        -0.6427876096865393
+      ]
+    },
+    {
+      "tilt_deg": 45,
+      "collision_mm3": 0,
+      "clearance_mm": 2.1731313812100708,
+      "cable_collision_mm3": 0,
+      "horn_collision_mm3": 0,
+      "view_direction": [
+        0.7071067811865476,
+        0,
+        -0.7071067811865476
+      ]
+    }
+  ],
+  "engineering": {
+    "assumptions": {
+      "webcam_g": 75,
+      "servo_g_each": 9,
+      "horn_g_each": 2,
+      "effective_density_g_cm3": [
+        0.434,
+        1.27
+      ],
+      "full_camera_COM_envelope": true,
+      "support_radius_mm": 68,
+      "cable_pull_height_mm": 180,
+      "cable_drag_N": 0.2,
+      "cable_torque_radius_mm": 60,
+      "gravity_motion_multiplier": 1.5
+    },
+    "worst_unanchored_case": {
+      "total_g": 154.19808295189918,
+      "tilt_deg": 30,
+      "cg_mm": [
+        -24.736216528085162,
+        58.786766921881316,
+        54.292950698898515
+      ],
+      "edge_margin_mm": 4.220972308666283,
+      "restoring_Nm": 0.00638281347208001,
+      "cable_force_threshold_N": 0.035460074844888945
+    },
+    "camera_radial_COM_bound_mm": 49.91824941842412,
+    "tilt_gravity_bound_kgcm": 0.3810612933599443,
+    "tilt_with_motion_and_cable_kgcm": 0.6939578855972679,
+    "manufacturer_nominal_stall_kgcm": 1.8,
+    "stall_to_estimated_demand_ratio": 2.5938173444787593,
+    "axis_formula": "d(p,t) = (cos(p)*cos(t), sin(p)*cos(t), -sin(t)); angles in radians",
+    "arm_section_I_old_mm4": 252.0,
+    "arm_section_I_new_mm4": 1166.6666666666667,
+    "arm_nominal_section_stiffness_ratio": 4.629629629629631,
+    "arm_note": "Section comparison only; curved geometry, access holes, layer adhesion, horn compliance and SG90 bearing stiffness require physical load testing.",
+    "decision": "Secure the base to a rigid work surface using its four M4 holes. Unanchored stability and servo stiffness are not certified by this model. Weigh the prints and measure real cable drag before relying on free-standing use."
+  },
+  "parts": {
+    "CurvedArm_SG90_TiltHolder": {
+      "volume_mm3": 29426.3000101208,
+      "centroid_mm": [
+        -5.445105768224971,
+        2.9372358093441906,
+        56.43711099316276
+      ],
+      "bbox_mm": [
+        51.00019992904411,
+        44.00099547594441,
+        104.00274213104197
+      ]
+    },
+    "SG90_RetainingCap": {
+      "volume_mm3": 2175.1932789459697,
+      "centroid_mm": [
+        -5.226516596111638e-17,
+        25.283125479208625,
+        93.99999999999996
+      ],
+      "bbox_mm": [
+        42.00000020000006,
+        5.600059879652889,
+        26.000000200000045
+      ]
+    },
+    "Logitech_C270_ScrewlessCradle": {
+      "volume_mm3": 13903.206049222292,
+      "centroid_mm": [
+        1.6143728325621203,
+        31.34300455717681,
+        -3.4179544810503475
+      ],
+      "bbox_mm": [
+        31.000099037557206,
+        84.7103364898483,
+        41.31009903755721
+      ]
+    },
+    "PanServo_StabilityBase": {
+      "volume_mm3": 86288.1185232298,
+      "centroid_mm": [
+        2.5831177164202055e-10,
+        -8.143829618863405e-15,
+        -23.90625878570729
+      ],
+      "bbox_mm": [
+        140.00412582256595,
+        140.03920843478676,
+        18.603617700584053
+      ]
+    }
+  }
+}

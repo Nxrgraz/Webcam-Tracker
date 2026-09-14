@@ -1,0 +1,50 @@
+C270 ROBOTIC ARM REVISION M
+Date: 2026-09-08
+
+CAD RESULTS
+68 recorded checks passed in CAD_and_Engineering_Results.json.
+Four printable components are single valid solids.
+All eight STEP exports re-import with the expected valid-solid counts.
+27 x 15 mm rectangular opening is clear.
+New 34 x 17 mm cap/holder screw pattern aligns and retains engagement material.
+Original shaft-screw/tool paths and recessed horn mounting holes are open.
+Servo ear, holder and cap interference checks pass.
+Side servo cable ports and central rear USB opening are unobstructed.
+Tilt motion checked every 5 degrees through -45 to +45 degrees.
+Camera, clip, cradle, rotating horn and straight rear cable proxy checks pass.
+Axial and radial separation also provide continuous camera/cradle clearance bounds.
+The webcam body has 2.786 mm^3 intentional overlap at the flexible grip ribs.
+
+CHANGE SUMMARY
+Reprint arm, cap and cradle. Reuse the Revision L stability base.
+The new base STL is SHA-256 identical to the Revision L base STL.
+Arm ribbon thickness: 10 mm instead of 6 mm.
+Cap opening: 27 x 15 mm instead of 22 x 15 mm.
+Cap outer face: 42 x 26 mm with rear ear-retaining pads.
+Camera orientation corrected to make the Y shaft change elevation.
+
+ENGINEERING RESULTS
+Estimated tilt demand with stated assumptions: 0.694 kg-cm.
+The cited 1.8 kg-cm SG90 stall rating is not a continuous working rating.
+Conservative sampled unanchored edge margin: 4.22 mm.
+Conservative sampled restoring moment: 0.00638 N-m.
+Decision: secure the base to a rigid work surface using all four M4 holes.
+See Engineering_Check.md for inputs, formulas, assumptions and limitations.
+
+SOFTWARE
+Camera_RevM.cpp is a separate copy of the user's tracker source.
+Command clamps changed from 0-180 to 45-135 on both axes.
+Commands are limited to one degree per axis at intervals of at least 33 ms.
+Camera_RevM.exe compiled and linked successfully with the existing g++/OpenCV setup.
+The existing serial library emitted its pre-existing alloca-redefinition warning.
+The new executable was not run against hardware. Firmware/pins are unconfirmed.
+Original Camera.cpp and Camera.exe were not modified.
+
+LIMITS
+Actual hardware screw sizes, camera center of mass, printer fit, servo stiffness,
+and flexible cable loops still require physical checks. No structural certification
+or guarantee against arbitrary pulling force or loss of servo power is implied.
+The CAD process printed REVISION M CAD CHECKS PASSED and all recorded checks passed,
+but its runtime returned exit code 1 after completion, as on prior revisions.
+The reason for that shutdown status is not established; the build is not described
+as a clean process exit. The separate C++ compile returned exit code 0.

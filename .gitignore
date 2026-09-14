@@ -1,0 +1,49 @@
+# Build files
+*.exe
+*.o
+*.obj
+*.dll
+*.pdb
+
+# Build folders
+build/
+bin/
+out/
+
+# VS Code / Visual Studio
+.vscode/
+.vs/
+CMakeFiles/
+CMakeCache.txt
+
+# Personal trained face model
+Jerison_face.onnx
+
+# Training data
+dataset/
+datasets/
+runs/
+train/
+valid/
+images/
+labels/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+# Third party dependency
+serial-main/
+
+# Old CAD revisions
+C270_Robotic_Arm_RevC/
+C270_Robotic_Arm_RevD/
+C270_Robotic_Arm_RevE/
+C270_Robotic_Arm_RevF/
+C270_Robotic_Arm_RevG/
+C270_Robotic_Arm_RevH/
+C270_Robotic_Arm_RevI/
+C270_Robotic_Arm_RevJ/
+C270_Robotic_Arm_RevK/
+C270_Robotic_Arm_RevL/
