@@ -18,8 +18,6 @@ int main()
     // CAMERA
     // =========================================================
 
-    // 0 = usually built-in laptop webcam
-    // 1 = external Logitech webcam
     constexpr int cameraIndex = 1;
 
     cv::VideoCapture cap(cameraIndex, cv::CAP_DSHOW);
@@ -30,15 +28,12 @@ int main()
         return 1;
     }
 
-    // Camera resolution
     cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
     cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
 
-    // Try to reduce camera delay
     cap.set(cv::CAP_PROP_BUFFERSIZE, 1);
 
-    // Try to remove digital zoom.
-    // Some Logitech webcams may ignore this.
+    // Try to remove digital zoom
     cap.set(cv::CAP_PROP_ZOOM, 0);
 
     std::cout << "Camera opened successfully!\n";
@@ -60,16 +55,6 @@ int main()
         return 1;
     }
 
-    // Leave these OFF unless your OpenCV supports CUDA.
-    //
-    // net.setPreferableBackend(
-    //     cv::dnn::DNN_BACKEND_CUDA
-    // );
-    //
-    // net.setPreferableTarget(
-    //     cv::dnn::DNN_TARGET_CUDA
-    // );
-
     std::cout << "YOLO face model loaded successfully!\n";
 
 
@@ -82,6 +67,7 @@ int main()
     try
     {
         arduino.setPort("COM7");
+
         arduino.setBaudrate(115200);
 
         serial::Timeout timeout =
@@ -109,7 +95,6 @@ int main()
 
     std::cout << "Arduino connected on COM7!\n";
 
-    // Arduino Uno resets when serial connection opens.
     std::this_thread::sleep_for(
         std::chrono::seconds(2)
     );
@@ -122,28 +107,20 @@ int main()
     constexpr int inputWidth = 640;
     constexpr int inputHeight = 640;
 
-    // Reduced from 0.50.
-    //
-    // Lowering this makes YOLO more willing to detect
-    // your face when farther away or turned.
     constexpr float confidenceThreshold = 0.40f;
 
     constexpr float nmsThreshold = 0.45f;
 
 
     // =========================================================
-    // AUTOMATIC TRACKING SETTINGS
+    // AUTO TRACKING SETTINGS
     // =========================================================
 
-    // Camera will stop trying to correct when your face is
-    // within this many pixels of the center.
     constexpr int deadZone = 50;
 
-    // Smaller Kp = smoother/slower movement.
     float panKp = 0.015f;
     float tiltKp = 0.015f;
 
-    // Maximum servo movement per automatic update.
     constexpr int maximumServoStep = 2;
 
 
@@ -151,11 +128,6 @@ int main()
     // FACE SMOOTHING
     // =========================================================
 
-    // Smaller = smoother but slightly slower.
-    //
-    // 0.10 = very smooth
-    // 0.15 = good starting point
-    // 0.25 = faster
     constexpr float smoothingAlpha = 0.15f;
 
     float smoothedFaceX = 0.0f;
@@ -172,9 +144,6 @@ int main()
     // SERVO UPDATE RATE
     // =========================================================
 
-    // Don't send commands every camera frame.
-    //
-    // 50 ms = maximum of about 20 servo updates/sec.
     constexpr int servoUpdateIntervalMs = 50;
 
     auto lastServoUpdate =
@@ -193,13 +162,11 @@ int main()
 
 
     // =========================================================
-    // MANUAL MODE SETTINGS
+    // MANUAL MODE
     // =========================================================
 
-    // Program starts in AUTO mode.
     bool manualMode = false;
 
-    // Each keyboard press changes servo by 2 degrees.
     constexpr int manualServoStep = 2;
 
 
@@ -266,6 +233,7 @@ int main()
         cv::resize(
             frame,
             resized,
+
             cv::Size(
                 resizedWidth,
                 resizedHeight
@@ -312,7 +280,7 @@ int main()
 
 
         // =====================================================
-        // CREATE YOLO INPUT
+        // YOLO INPUT
         // =====================================================
 
         cv::Mat blob;
@@ -358,11 +326,12 @@ int main()
         }
 
 
-        cv::Mat output = outputs[0];
+        cv::Mat output =
+            outputs[0];
 
 
         // =====================================================
-        // PRINT YOLO OUTPUT SHAPE ONCE
+        // PRINT OUTPUT SHAPE ONCE
         // =====================================================
 
         if (!printedOutputShape)
@@ -381,11 +350,13 @@ int main()
 
                 if (i < output.dims - 1)
                 {
-                    std::cout << " x ";
+                    std::cout
+                        << " x ";
                 }
             }
 
-            std::cout << '\n';
+            std::cout
+                << '\n';
 
             printedOutputShape = true;
         }
@@ -410,10 +381,6 @@ int main()
         cv::Mat detectionData;
 
 
-        // Typical YOLOv8 output:
-        //
-        // 1 x 5 x 8400
-
         if (output.size[1] < output.size[2])
         {
             dimensions =
@@ -436,10 +403,6 @@ int main()
                 detectionData
             );
         }
-
-        // Alternate:
-        //
-        // 1 x 8400 x 5
 
         else
         {
@@ -487,13 +450,20 @@ int main()
                 detectionData.ptr<float>(i);
 
 
-            float centerX = data[0];
-            float centerY = data[1];
+            float centerX =
+                data[0];
 
-            float width = data[2];
-            float height = data[3];
+            float centerY =
+                data[1];
 
-            float confidence = data[4];
+            float width =
+                data[2];
+
+            float height =
+                data[3];
+
+            float confidence =
+                data[4];
 
 
             if (
@@ -504,10 +474,6 @@ int main()
                 continue;
             }
 
-
-            // =================================================
-            // CONVERT YOLO COORDINATES TO CAMERA COORDINATES
-            // =================================================
 
             float leftLetterbox =
                 centerX -
@@ -626,7 +592,7 @@ int main()
             frame.rows / 2;
 
 
-        // Blue center point
+        // Blue point = center of image
         cv::circle(
             frame,
 
@@ -648,7 +614,7 @@ int main()
 
 
         // =====================================================
-        // DRAW DEAD ZONE
+        // DEAD ZONE
         // =====================================================
 
         cv::rectangle(
@@ -675,7 +641,7 @@ int main()
 
 
         // =====================================================
-        // FIND TARGET
+        // SELECT TARGET
         // =====================================================
 
         int targetIndex = -1;
@@ -687,17 +653,20 @@ int main()
             int area =
                 boxes[index].area();
 
+
             if (area > largestArea)
             {
-                largestArea = area;
+                largestArea =
+                    area;
 
-                targetIndex = index;
+                targetIndex =
+                    index;
             }
         }
 
 
         // =====================================================
-        // FACE DETECTED
+        // TARGET FOUND
         // =====================================================
 
         if (targetIndex != -1)
@@ -708,12 +677,13 @@ int main()
             cv::Rect box =
                 boxes[targetIndex];
 
+
             float targetConfidence =
                 scores[targetIndex];
 
 
             // =================================================
-            // DRAW FACE BOX
+            // FACE BOX
             // =================================================
 
             cv::rectangle(
@@ -777,7 +747,7 @@ int main()
                 box.height / 2;
 
 
-            // Red = raw YOLO point.
+            // Red dot = raw YOLO position
             cv::circle(
                 frame,
 
@@ -814,8 +784,10 @@ int main()
                         rawFaceCenterY
                     );
 
-                firstDetection = false;
+                firstDetection =
+                    false;
             }
+
             else
             {
                 smoothedFaceX =
@@ -855,7 +827,7 @@ int main()
                 );
 
 
-            // Yellow = smoothed tracking point.
+            // Yellow dot = smoothed tracking position
             cv::circle(
                 frame,
 
@@ -877,7 +849,7 @@ int main()
 
 
             // =================================================
-            // TRACKING ERROR
+            // ERROR
             // =================================================
 
             int errorX =
@@ -913,13 +885,8 @@ int main()
 
 
             // =================================================
-            // AUTOMATIC CONTROL
+            // AUTOMATIC TRACKING
             // =================================================
-
-            // IMPORTANT:
-            //
-            // Automatic control only runs when MANUAL MODE
-            // is turned OFF.
 
             if (!manualMode)
             {
@@ -967,7 +934,12 @@ int main()
                             );
 
 
-                        panAngle +=
+                        // IMPORTANT
+                        //
+                        // INVERTED because your webcam
+                        // is physically mounted reversed.
+
+                        panAngle -=
                             panChange;
                     }
 
@@ -1004,7 +976,7 @@ int main()
 
 
                     // =========================================
-                    // LIMIT SERVO ANGLES
+                    // SERVO LIMITS
                     // =========================================
 
                     panAngle =
@@ -1024,7 +996,7 @@ int main()
 
 
                     // =========================================
-                    // SEND AUTOMATIC COMMAND
+                    // SEND AUTO COMMAND
                     // =========================================
 
                     if (
@@ -1087,7 +1059,7 @@ int main()
 
 
         // =====================================================
-        // NO FACE DETECTED
+        // NO FACE FOUND
         // =====================================================
 
         else
@@ -1100,13 +1072,14 @@ int main()
                 resetSmoothingAfterLostFrames
             )
             {
-                firstDetection = true;
+                firstDetection =
+                    true;
             }
         }
 
 
         // =====================================================
-        // DISPLAY PAN ANGLE
+        // DISPLAY PAN
         // =====================================================
 
         cv::putText(
@@ -1137,7 +1110,7 @@ int main()
 
 
         // =====================================================
-        // DISPLAY TILT ANGLE
+        // DISPLAY TILT
         // =====================================================
 
         cv::putText(
@@ -1168,7 +1141,7 @@ int main()
 
 
         // =====================================================
-        // DISPLAY NUMBER OF FACES
+        // DISPLAY FACE COUNT
         // =====================================================
 
         cv::putText(
@@ -1210,6 +1183,7 @@ int main()
             modeText =
                 "MANUAL | W/S Tilt | A/D Pan | R Center | M Auto";
         }
+
         else
         {
             modeText =
@@ -1251,7 +1225,7 @@ int main()
 
 
         // =====================================================
-        // KEYBOARD INPUT
+        // KEYBOARD
         // =====================================================
 
         int key =
@@ -1260,7 +1234,7 @@ int main()
 
 
         // =====================================================
-        // M = SWITCH AUTO / MANUAL
+        // M = AUTO / MANUAL
         // =====================================================
 
         if (
@@ -1301,24 +1275,26 @@ int main()
                 std::cout
                     << "============================\n\n";
             }
+
             else
             {
                 std::cout
                     << "\nAUTO TRACKING ENABLED\n";
 
-                // Reset smoothing so YOLO starts clean.
-                firstDetection = true;
+                firstDetection =
+                    true;
             }
         }
 
 
         // =====================================================
-        // MANUAL MODE
+        // MANUAL CONTROL
         // =====================================================
 
         if (manualMode)
         {
-            bool servoChanged = false;
+            bool servoChanged =
+                false;
 
 
             // =================================================
@@ -1333,7 +1309,8 @@ int main()
                 tiltAngle +=
                     manualServoStep;
 
-                servoChanged = true;
+                servoChanged =
+                    true;
             }
 
 
@@ -1349,12 +1326,15 @@ int main()
                 tiltAngle -=
                     manualServoStep;
 
-                servoChanged = true;
+                servoChanged =
+                    true;
             }
 
 
             // =================================================
             // A = PAN LEFT
+            //
+            // INVERTED because your webcam is mounted backwards
             // =================================================
 
             if (
@@ -1362,15 +1342,18 @@ int main()
                 key == 'A'
             )
             {
-                panAngle -=
+                panAngle +=
                     manualServoStep;
 
-                servoChanged = true;
+                servoChanged =
+                    true;
             }
 
 
             // =================================================
             // D = PAN RIGHT
+            //
+            // INVERTED because your webcam is mounted backwards
             // =================================================
 
             if (
@@ -1378,15 +1361,16 @@ int main()
                 key == 'D'
             )
             {
-                panAngle +=
+                panAngle -=
                     manualServoStep;
 
-                servoChanged = true;
+                servoChanged =
+                    true;
             }
 
 
             // =================================================
-            // R = RETURN TO CENTER
+            // R = CENTER
             // =================================================
 
             if (
@@ -1397,12 +1381,13 @@ int main()
                 panAngle = 90;
                 tiltAngle = 90;
 
-                servoChanged = true;
+                servoChanged =
+                    true;
             }
 
 
             // =================================================
-            // LIMIT ANGLES
+            // SERVO LIMITS
             // =================================================
 
             panAngle =
@@ -1486,6 +1471,7 @@ int main()
     {
         arduino.close();
     }
+
 
     cap.release();
 
