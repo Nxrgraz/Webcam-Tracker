@@ -10,6 +10,7 @@
 #include <limits>
 #include <sstream>
 #include <iomanip>
+#include <deque>
 #include "serial/serial.h"
 
 void sendServoCommand(
@@ -49,6 +50,336 @@ void sendServoCommand(
 
     previousPanAngle = panAngle;
     previousTiltAngle = tiltAngle;
+}
+
+struct AxisMPCConfig
+{
+    float tauSeconds;
+    float commandGain;
+    float delaySeconds;
+    float pixelsPerDegree;
+    float cameraEffectSign;
+
+    float qError;
+    float rControl;
+    float sCommandChange;
+
+    float maximumVelocity;
+    float maximumAcceleration;
+
+    int horizonSteps;
+    float candidateStep;
+};
+
+struct AxisPredictiveState
+{
+    float modelVelocity = 0.0f;
+    float targetImageVelocity = 0.0f;
+
+    // Filtered raw image velocity. This is used only to determine whether
+    // the detected face is genuinely stationary rather than reacting to
+    // small YOLO / camera jitter.
+    float measuredImageVelocity = 0.0f;
+
+    float previousMeasuredError = 0.0f;
+    float previousCommand = 0.0f;
+
+    int delaySteps = 0;
+    bool initialized = false;
+
+    std::deque<float> delayQueue;
+};
+
+void resetAxisPredictiveState(
+    AxisPredictiveState& state,
+    float measuredError,
+    const AxisMPCConfig& config,
+    float nominalDt)
+{
+    state.modelVelocity = 0.0f;
+    state.targetImageVelocity = 0.0f;
+    state.measuredImageVelocity = 0.0f;
+    state.previousMeasuredError = measuredError;
+    state.previousCommand = 0.0f; 
+
+    state.delaySteps =
+        std::max(
+            0,
+            static_cast<int>(
+                std::round(
+                    config.delaySeconds /
+                    nominalDt
+                )
+            )
+        );
+
+    state.delayQueue.clear();
+
+    for (int i = 0; i < state.delaySteps; ++i)
+        state.delayQueue.push_back(0.0f);
+
+    state.initialized = true;
+}
+
+void advanceAxisObserver(
+    AxisPredictiveState& state,
+    float measuredError,
+    float dt,
+    const AxisMPCConfig& config,
+    float nominalDt)
+{
+    if (!state.initialized)
+    {
+        resetAxisPredictiveState(
+            state,
+            measuredError,
+            config,
+            nominalDt
+        );
+
+        return;
+    }
+
+    float delayedCommand =
+        state.previousCommand;
+
+    if (state.delaySteps > 0)
+    {
+        if (state.delayQueue.empty())
+            state.delayQueue.push_back(
+                state.previousCommand
+            );
+
+        delayedCommand =
+            state.delayQueue.front();
+
+        state.delayQueue.pop_front();
+    }
+
+    float a =
+        std::exp(
+            -dt /
+            std::max(
+                config.tauSeconds,
+                0.001f
+            )
+        );
+
+    float b =
+        config.commandGain *
+        (1.0f - a);
+
+    state.modelVelocity =
+        a * state.modelVelocity +
+        b * delayedCommand;
+
+    float relativeImageVelocity =
+        (
+            measuredError -
+            state.previousMeasuredError
+        ) /
+        std::max(dt, 0.001f);
+
+    constexpr float measuredVelocityAlpha = 0.18f;
+
+    state.measuredImageVelocity =
+        measuredVelocityAlpha *
+        relativeImageVelocity +
+        (1.0f - measuredVelocityAlpha) *
+        state.measuredImageVelocity;
+
+    float cameraImageVelocity =
+        config.cameraEffectSign *
+        config.pixelsPerDegree *
+        state.modelVelocity;
+
+    float measuredTargetImageVelocity =
+        relativeImageVelocity -
+        cameraImageVelocity;
+
+    measuredTargetImageVelocity =
+        std::clamp(
+            measuredTargetImageVelocity,
+            -700.0f,
+            700.0f
+        );
+
+    constexpr float observerAlpha = 0.14f;
+
+    state.targetImageVelocity =
+        observerAlpha *
+        measuredTargetImageVelocity +
+        (1.0f - observerAlpha) *
+        state.targetImageVelocity;
+
+    state.previousMeasuredError =
+        measuredError;
+}
+
+void queueAxisCommand(
+    AxisPredictiveState& state,
+    float command)
+{
+    if (state.delaySteps > 0)
+        state.delayQueue.push_back(command);
+
+    state.previousCommand =
+        command;
+}
+
+float solveAxisMPC(
+    float measuredError,
+    const AxisPredictiveState& state,
+    const AxisMPCConfig& config,
+    float dt)
+{
+    float bestCommand = 0.0f;
+    float bestCost =
+        std::numeric_limits<float>::infinity();
+
+    float step =
+        std::max(
+            config.candidateStep,
+            0.5f
+        );
+
+    for (
+        float candidate =
+            -config.maximumVelocity;
+        candidate <=
+            config.maximumVelocity +
+            0.001f;
+        candidate += step
+    )
+    {
+        float simulatedError =
+            measuredError;
+
+        float simulatedVelocity =
+            state.modelVelocity;
+
+        float simulatedCommand =
+            state.previousCommand;
+
+        std::deque<float> simulatedDelay =
+            state.delayQueue;
+
+        float cost = 0.0f;
+
+        for (
+            int k = 0;
+            k < config.horizonSteps;
+            ++k
+        )
+        {
+            float previousSimulatedCommand =
+                simulatedCommand;
+
+            float maximumCommandChange =
+                config.maximumAcceleration *
+                dt;
+
+            simulatedCommand +=
+                std::clamp(
+                    candidate -
+                        simulatedCommand,
+                    -maximumCommandChange,
+                    maximumCommandChange
+                );
+
+            float appliedCommand =
+                simulatedCommand;
+
+            if (state.delaySteps > 0)
+            {
+                simulatedDelay.push_back(
+                    simulatedCommand
+                );
+
+                appliedCommand =
+                    simulatedDelay.front();
+
+                simulatedDelay.pop_front();
+            }
+
+            float a =
+                std::exp(
+                    -dt /
+                    std::max(
+                        config.tauSeconds,
+                        0.001f
+                    )
+                );
+
+            float b =
+                config.commandGain *
+                (1.0f - a);
+
+            simulatedVelocity =
+                a * simulatedVelocity +
+                b * appliedCommand;
+
+            float predictedErrorRate =
+                state.targetImageVelocity +
+                config.cameraEffectSign *
+                config.pixelsPerDegree *
+                simulatedVelocity;
+
+            simulatedError +=
+                predictedErrorRate *
+                dt;
+
+            float normalizedError =
+                simulatedError /
+                100.0f;
+
+            float normalizedControl =
+                simulatedCommand /
+                std::max(
+                    config.maximumVelocity,
+                    0.1f
+                );
+
+            float normalizedCommandChange =
+                (
+                    simulatedCommand -
+                    previousSimulatedCommand
+                ) /
+                std::max(
+                    config.maximumVelocity,
+                    0.1f
+                );
+
+            cost +=
+                config.qError *
+                    normalizedError *
+                    normalizedError +
+                config.rControl *
+                    normalizedControl *
+                    normalizedControl +
+                config.sCommandChange *
+                    normalizedCommandChange *
+                    normalizedCommandChange;
+        }
+
+        float terminalError =
+            simulatedError /
+            100.0f;
+
+        cost +=
+            2.0f *
+            config.qError *
+            terminalError *
+            terminalError;
+
+        if (cost < bestCost)
+        {
+            bestCost = cost;
+            bestCommand = candidate;
+        }
+    }
+
+    return bestCommand;
 }
 
 int main()
@@ -129,7 +460,7 @@ int main()
     constexpr float nmsThreshold = 0.45f;
 
     // FACE POSITION SMOOTHING
-    constexpr float smoothingAlpha = 0.07f;
+    constexpr float smoothingAlpha = 0.16f;
 
     float smoothedFaceX = 0.0f;
     float smoothedFaceY = 0.0f;
@@ -149,7 +480,28 @@ int main()
     bool panTrackingActive = false;
     bool tiltTrackingActive = false;
 
-    // PID GAINS
+    // STATIONARY HOLD
+    // Once the face has remained near center and nearly motionless for a
+    // few control cycles, freeze both axes. This prevents detector noise
+    // and observer noise from causing tiny continuous servo corrections.
+    bool stationaryHold = false;
+    int stationaryHoldCounter = 0;
+
+    constexpr int stationaryHoldFrames = 5; // about 0.25 s at 20 Hz
+
+    constexpr float stationaryEnterErrorX = 28.0f;
+    constexpr float stationaryEnterErrorY = 22.0f;
+
+    constexpr float stationaryExitErrorX = 50.0f;
+    constexpr float stationaryExitErrorY = 40.0f;
+
+    constexpr float stationaryEnterVelocityX = 28.0f; // pixels / second
+    constexpr float stationaryEnterVelocityY = 24.0f;
+
+    constexpr float stationaryExitVelocityX = 70.0f;
+    constexpr float stationaryExitVelocityY = 60.0f;
+
+    // LEGACY PID CONSTANTS (AUTO uses predictive MPC)
     // Pan is tuned separately because this axis was sluggish/occasionally reversed.
     float panKp = 0.022f;
     float panKi = 0.0015f;
@@ -159,7 +511,7 @@ int main()
     float tiltKi = 0.0020f;
     float tiltKd = 0.0030f;
 
-    // PID STATE
+    // LEGACY PID STATE (kept for reset/manual compatibility)
     float previousErrorX = 0.0f;
     float previousErrorY = 0.0f;
 
@@ -210,9 +562,49 @@ int main()
 
     // CONTROL LOOP RATE
     constexpr int controlIntervalMs = 50;
+    constexpr float nominalControlDt = 0.050f;
 
     auto previousControlTime =
         std::chrono::steady_clock::now();
+
+    // IMAGE-PLANE PREDICTIVE MPC
+    //
+    // These are safe STARTING estimates, not measured plant parameters.
+    // Tune tau, delay, and pixelsPerDegree later from logged experiments.
+    AxisMPCConfig panMPC
+    {
+        0.24f,
+        1.00f,
+        0.10f,
+        18.0f,
+        +1.0f,
+        1.00f,
+        0.06f,
+        0.28f,
+        maximumVelocity,
+        maximumAcceleration,
+        10,
+        3.0f
+    };
+
+    AxisMPCConfig tiltMPC
+    {
+        0.16f,
+        1.00f,
+        0.08f,
+        18.0f,
+        -1.0f,
+        1.00f,
+        0.07f,
+        0.30f,
+        maximumVelocity,
+        maximumAcceleration,
+        10,
+        3.0f
+    };
+
+    AxisPredictiveState panPredictiveState;
+    AxisPredictiveState tiltPredictiveState;
 
     // MANUAL MODE
     bool manualMode = false;
@@ -709,7 +1101,7 @@ int main()
                 2
             );
 
-            // AUTO PD CONTROL
+            // AUTO PREDICTIVE MPC CONTROL
             if (!manualMode)
             {
                 auto now =
@@ -734,8 +1126,6 @@ int main()
                     previousControlTime =
                         now;
 
-                    // Prevent a long pause / lost target from producing
-                    // one huge control step when the face is detected again.
                     dt =
                         std::clamp(
                             dt,
@@ -755,223 +1145,222 @@ int main()
                             frameCenterY
                         );
 
-                    // HYSTERESIS
-                    // Do not continuously switch between moving/stopping when
-                    // the detected face jitters by a few pixels.
-                    float absoluteErrorX =
-                        std::abs(errorX);
+                    advanceAxisObserver(
+                        panPredictiveState,
+                        errorX,
+                        dt,
+                        panMPC,
+                        nominalControlDt
+                    );
 
-                    float absoluteErrorY =
-                        std::abs(errorY);
+                    advanceAxisObserver(
+                        tiltPredictiveState,
+                        errorY,
+                        dt,
+                        tiltMPC,
+                        nominalControlDt
+                    );
 
-                    if (panTrackingActive)
+                    // STATIONARY HOLD DETECTION
+                    //
+                    // Enter only after several consecutive quiet frames.
+                    // Exit immediately when the face moves far enough or fast
+                    // enough, so real-time tracking responsiveness is retained.
+                    bool faceNearCenter =
+                        std::abs(errorX) <= stationaryEnterErrorX &&
+                        std::abs(errorY) <= stationaryEnterErrorY;
+
+                    bool faceNearlyStill =
+                        std::abs(
+                            panPredictiveState.measuredImageVelocity
+                        ) <= stationaryEnterVelocityX &&
+                        std::abs(
+                            tiltPredictiveState.measuredImageVelocity
+                        ) <= stationaryEnterVelocityY;
+
+                    bool faceClearlyMoved =
+                        std::abs(errorX) >= stationaryExitErrorX ||
+                        std::abs(errorY) >= stationaryExitErrorY ||
+                        std::abs(
+                            panPredictiveState.measuredImageVelocity
+                        ) >= stationaryExitVelocityX ||
+                        std::abs(
+                            tiltPredictiveState.measuredImageVelocity
+                        ) >= stationaryExitVelocityY;
+
+                    if (stationaryHold)
                     {
-                        if (absoluteErrorX <= panStopError)
-                            panTrackingActive = false;
+                        if (faceClearlyMoved)
+                        {
+                            stationaryHold = false;
+                            stationaryHoldCounter = 0;
+
+                            // Start the prediction model fresh from the current
+                            // measured location after leaving hold.
+                            resetAxisPredictiveState(
+                                panPredictiveState,
+                                errorX,
+                                panMPC,
+                                nominalControlDt
+                            );
+
+                            resetAxisPredictiveState(
+                                tiltPredictiveState,
+                                errorY,
+                                tiltMPC,
+                                nominalControlDt
+                            );
+                        }
                     }
                     else
                     {
-                        if (absoluteErrorX >= panStartError)
-                            panTrackingActive = true;
+                        if (
+                            faceNearCenter &&
+                            faceNearlyStill
+                        )
+                        {
+                            stationaryHoldCounter++;
+                        }
+                        else
+                        {
+                            stationaryHoldCounter = 0;
+                        }
+
+                        if (
+                            stationaryHoldCounter >=
+                            stationaryHoldFrames
+                        )
+                        {
+                            stationaryHold = true;
+
+                            panTrackingActive = false;
+                            tiltTrackingActive = false;
+
+                            panVelocity = 0.0f;
+                            tiltVelocity = 0.0f;
+
+                            panPredictiveState.modelVelocity = 0.0f;
+                            tiltPredictiveState.modelVelocity = 0.0f;
+
+                            panPredictiveState.targetImageVelocity = 0.0f;
+                            tiltPredictiveState.targetImageVelocity = 0.0f;
+
+                            panPredictiveState.measuredImageVelocity = 0.0f;
+                            tiltPredictiveState.measuredImageVelocity = 0.0f;
+
+                            panPredictiveState.previousCommand = 0.0f;
+                            tiltPredictiveState.previousCommand = 0.0f;
+
+                            // Match the internal targets to the last physical
+                            // servo command so nothing continues drifting while
+                            // the hold is active.
+                            panCommand = panServoCommand;
+                            tiltCommand = tiltServoCommand;
+                        }
+                    }
+
+                    constexpr float displayPredictionSeconds = 0.18f;
+
+                    float predictedErrorX =
+                        errorX +
+                        panPredictiveState.targetImageVelocity *
+                        displayPredictionSeconds;
+
+                    float predictedErrorY =
+                        errorY +
+                        tiltPredictiveState.targetImageVelocity *
+                        displayPredictionSeconds;
+
+                    constexpr float panStartVelocity = 110.0f;
+                    constexpr float panStopVelocity = 28.0f;
+
+                    constexpr float tiltStartVelocity = 90.0f;
+                    constexpr float tiltStopVelocity = 24.0f;
+
+                    if (!stationaryHold)
+                    {
+                        if (panTrackingActive)
+                        {
+                            if (
+                                std::abs(errorX) <= panStopError &&
+                                std::abs(
+                                    panPredictiveState.targetImageVelocity
+                                ) <= panStopVelocity
+                            )
+                            {
+                                panTrackingActive = false;
+                            }
+                        }
+                        else
+                        {
+                            if (
+                                std::abs(predictedErrorX) >= panStartError ||
+                                std::abs(
+                                    panPredictiveState.targetImageVelocity
+                                ) >= panStartVelocity
+                            )
+                            {
+                                panTrackingActive = true;
+                            }
+                        }
+
+                        if (tiltTrackingActive)
+                        {
+                            if (
+                                std::abs(errorY) <= tiltStopError &&
+                                std::abs(
+                                    tiltPredictiveState.targetImageVelocity
+                                ) <= tiltStopVelocity
+                            )
+                            {
+                                tiltTrackingActive = false;
+                            }
+                        }
+                        else
+                        {
+                            if (
+                                std::abs(predictedErrorY) >= tiltStartError ||
+                                std::abs(
+                                    tiltPredictiveState.targetImageVelocity
+                                ) >= tiltStartVelocity
+                            )
+                            {
+                                tiltTrackingActive = true;
+                            }
+                        }
+
+                    }
+                    else
+                    {
+                        panTrackingActive = false;
+                        tiltTrackingActive = false;
+                    }
+
+                    float desiredPanVelocity = 0.0f;
+                    float desiredTiltVelocity = 0.0f;
+
+                    if (panTrackingActive)
+                    {
+                        desiredPanVelocity =
+                            solveAxisMPC(
+                                errorX,
+                                panPredictiveState,
+                                panMPC,
+                                nominalControlDt
+                            );
                     }
 
                     if (tiltTrackingActive)
                     {
-                        if (absoluteErrorY <= tiltStopError)
-                            tiltTrackingActive = false;
-                    }
-                    else
-                    {
-                        if (absoluteErrorY >= tiltStartError)
-                            tiltTrackingActive = true;
-                    }
-
-                    if (!panTrackingActive)
-                    {
-                        errorX = 0.0f;
-                        integralX = 0.0f;
-                    }
-
-                    if (!tiltTrackingActive)
-                    {
-                        errorY = 0.0f;
-                        integralY = 0.0f;
-                    }
-
-                    // INITIALIZE PID
-                    if (!pidInitialized)
-                    {
-                        previousErrorX = errorX;
-                        previousErrorY = errorY;
-
-                        filteredDerivativeX = 0.0f;
-                        filteredDerivativeY = 0.0f;
-
-                        pidInitialized = true;
-                    }
-
-                    // ERROR VELOCITY
-                    float rawDerivativeX =
-                        (errorX -
-                         previousErrorX) /
-                        dt;
-
-                    float rawDerivativeY =
-                        (errorY -
-                         previousErrorY) /
-                        dt;
-
-                    // FILTER DERIVATIVE
-                    filteredDerivativeX =
-                        derivativeAlpha *
-                        rawDerivativeX +
-                        (1.0f -
-                         derivativeAlpha) *
-                        filteredDerivativeX;
-
-                    filteredDerivativeY =
-                        derivativeAlpha *
-                        rawDerivativeY +
-                        (1.0f -
-                         derivativeAlpha) *
-                        filteredDerivativeY;
-
-                    // INTEGRAL
-                    integralX +=
-                        errorX *
-                        dt;
-
-                    integralY +=
-                        errorY *
-                        dt;
-
-                    // ANTI WINDUP
-                    integralX =
-                        std::clamp(
-                            integralX,
-                            -1000.0f,
-                            1000.0f
-                        );
-
-                    integralY =
-                        std::clamp(
-                            integralY,
-                            -1000.0f,
-                            1000.0f
-                        );
-
-                    // PID OUTPUT = DESIRED SERVO VELOCITY
-
-                    // PAN PID
-                    // Physical mapping confirmed:
-                    // increasing pan angle = camera RIGHT
-                    // decreasing pan angle = camera LEFT
-                    float panP =
-                        panKp * errorX;
-
-                    // Integral removes a persistent centering error, but
-                    // cap its contribution so it cannot wind up and cause hunting.
-                    float panI =
-                        std::clamp(
-                            panKi * integralX,
-                            -0.75f,
-                            0.75f
-                        );
-
-                    float panD =
-                        panKd *
-                        filteredDerivativeX;
-
-                    // Keep D as damping only. Do not let a noisy derivative
-                    // overpower P and reverse the desired pan direction.
-                    float maximumPanD =
-                        std::abs(panP) * 0.50f;
-
-                    panD =
-                        std::clamp(
-                            panD,
-                            -maximumPanD,
-                            maximumPanD
-                        );
-
-                    float desiredPanVelocity =
-                        panP +
-                        panI +
-                        panD;
-
-                    // TILT PID
-                    float tiltP =
-                        tiltKp * errorY;
-
-                    float tiltI =
-                        std::clamp(
-                            tiltKi * integralY,
-                            -1.20f,
-                            1.20f
-                        );
-
-                    float tiltD =
-                        tiltKd *
-                        filteredDerivativeY;
-
-                    // Keep tilt derivative from overpowering the direction
-                    // set by the proportional term.
-                    float maximumTiltD =
-                        std::abs(tiltP) * 0.50f;
-
-                    tiltD =
-                        std::clamp(
-                            tiltD,
-                            -maximumTiltD,
-                            maximumTiltD
-                        );
-
-                    float desiredTiltVelocity =
-                        tiltP +
-                        tiltI +
-                        tiltD;
-
-                    // PHYSICAL DIRECTION CORRECTION:
-                    // Pan is physically reversed, so invert pan.
-                    // Tilt is NOT reversed:
-                    // face below center -> positive errorY -> increase tilt angle -> camera DOWN
-                    desiredPanVelocity =
-                        -desiredPanVelocity;
-
-                    // Use only a very small minimum velocity. The integral
-                    // term can now build gently against persistent error instead
-                    // of forcing a large sudden kick.
-                    constexpr float minimumPanVelocity = 1.0f;
-
-                    if (
-                        errorX != 0.0f &&
-                        std::abs(desiredPanVelocity) <
-                            minimumPanVelocity
-                    )
-                    {
-                        desiredPanVelocity =
-                            errorX > 0.0f
-                            ? -minimumPanVelocity
-                            : minimumPanVelocity;
-                    }
-
-                    // Small minimum tilt velocity only. Integral action
-                    // handles persistent offset without aggressive hunting.
-                    constexpr float minimumTiltVelocity = 0.8f;
-
-                    if (
-                        errorY != 0.0f &&
-                        std::abs(desiredTiltVelocity) <
-                            minimumTiltVelocity
-                    )
-                    {
                         desiredTiltVelocity =
-                            errorY > 0.0f
-                            ? minimumTiltVelocity
-                            : -minimumTiltVelocity;
+                            solveAxisMPC(
+                                errorY,
+                                tiltPredictiveState,
+                                tiltMPC,
+                                nominalControlDt
+                            );
                     }
 
-                    // MAXIMUM SPEED
                     desiredPanVelocity =
                         std::clamp(
                             desiredPanVelocity,
@@ -986,48 +1375,47 @@ int main()
                             maximumVelocity
                         );
 
-                    // ACCELERATION LIMIT
+                    if (stationaryHold)
+                    {
+                        desiredPanVelocity = 0.0f;
+                        desiredTiltVelocity = 0.0f;
+
+                        panVelocity = 0.0f;
+                        tiltVelocity = 0.0f;
+                    }
+
                     float maximumVelocityChange =
                         maximumAcceleration *
                         dt;
 
-                    float panVelocityChange =
-                        desiredPanVelocity -
-                        panVelocity;
-
-                    float tiltVelocityChange =
-                        desiredTiltVelocity -
-                        tiltVelocity;
-
-                    panVelocityChange =
-                        std::clamp(
-                            panVelocityChange,
-                            -maximumVelocityChange,
-                            maximumVelocityChange
-                        );
-
-                    tiltVelocityChange =
-                        std::clamp(
-                            tiltVelocityChange,
-                            -maximumVelocityChange,
-                            maximumVelocityChange
-                        );
-
                     panVelocity +=
-                        panVelocityChange;
+                        std::clamp(
+                            desiredPanVelocity -
+                                panVelocity,
+                            -maximumVelocityChange,
+                            maximumVelocityChange
+                        );
 
                     tiltVelocity +=
-                        tiltVelocityChange;
+                        std::clamp(
+                            desiredTiltVelocity -
+                                tiltVelocity,
+                            -maximumVelocityChange,
+                            maximumVelocityChange
+                        );
 
-                    // IF CENTERED, SLOW TO A STOP
-                    if (errorX == 0.0f)
+                    if (stationaryHold)
+                    {
+                        panVelocity = 0.0f;
+                        tiltVelocity = 0.0f;
+                    }
+
+                    if (!panTrackingActive)
                     {
                         panVelocity *= 0.45f;
 
                         if (
-                            std::abs(
-                                panVelocity
-                            ) <
+                            std::abs(panVelocity) <
                             0.25f
                         )
                         {
@@ -1035,14 +1423,12 @@ int main()
                         }
                     }
 
-                    if (errorY == 0.0f)
+                    if (!tiltTrackingActive)
                     {
                         tiltVelocity *= 0.40f;
 
                         if (
-                            std::abs(
-                                tiltVelocity
-                            ) <
+                            std::abs(tiltVelocity) <
                             0.25f
                         )
                         {
@@ -1050,7 +1436,16 @@ int main()
                         }
                     }
 
-                    // VELOCITY -> POSITION
+                    queueAxisCommand(
+                        panPredictiveState,
+                        panVelocity
+                    );
+
+                    queueAxisCommand(
+                        tiltPredictiveState,
+                        tiltVelocity
+                    );
+
                     panCommand +=
                         panVelocity *
                         dt;
@@ -1059,7 +1454,6 @@ int main()
                         tiltVelocity *
                         dt;
 
-                    // SAFE LIMITS
                     float unclampedPan =
                         panCommand;
 
@@ -1080,17 +1474,12 @@ int main()
                             tiltMaximum
                         );
 
-                    // STOP VELOCITY AT HARD LIMITS
                     if (panCommand != unclampedPan)
                         panVelocity = 0.0f;
 
                     if (tiltCommand != unclampedTilt)
                         tiltVelocity = 0.0f;
 
-                    // SHARED OUTPUT UPDATE
-                    // Do NOT scale tilt by pan error. That made tilt weak whenever
-                    // pan had the larger error. Pan is stepped for the mechanics,
-                    // while tilt follows its already-smoothed PID target directly.
                     auto coordinatedNow =
                         std::chrono::steady_clock::now();
 
@@ -1134,10 +1523,6 @@ int main()
                                 );
                         }
 
-                        // Preserve the good tilt behavior from the earlier
-                        // version. tiltCommand is already velocity/acceleration
-                        // limited by the PID controller, so no extra stepping
-                        // or proportional scaling is needed here.
                         tiltServoCommand =
                             std::clamp(
                                 tiltCommand,
@@ -1157,6 +1542,64 @@ int main()
                         );
                     }
 
+                    int predictedX =
+                        std::clamp(
+                            static_cast<int>(
+                                std::round(
+                                    static_cast<float>(
+                                        frameCenterX
+                                    ) +
+                                    predictedErrorX
+                                )
+                            ),
+                            0,
+                            frame.cols - 1
+                        );
+
+                    int predictedY =
+                        std::clamp(
+                            static_cast<int>(
+                                std::round(
+                                    static_cast<float>(
+                                        frameCenterY
+                                    ) +
+                                    predictedErrorY
+                                )
+                            ),
+                            0,
+                            frame.rows - 1
+                        );
+
+                    cv::circle(
+                        frame,
+                        cv::Point(
+                            predictedX,
+                            predictedY
+                        ),
+                        7,
+                        cv::Scalar(255, 0, 255),
+                        2
+                    );
+
+                    cv::putText(
+                        frame,
+                        "Prediction",
+                        cv::Point(
+                            std::min(
+                                predictedX + 10,
+                                frame.cols - 120
+                            ),
+                            std::max(
+                                predictedY - 10,
+                                20
+                            )
+                        ),
+                        cv::FONT_HERSHEY_SIMPLEX,
+                        0.45,
+                        cv::Scalar(255, 0, 255),
+                        1
+                    );
+
                     std::cout
                         << std::fixed
                         << std::setprecision(2)
@@ -1168,23 +1611,29 @@ int main()
                         << tiltCommand
                         << " TiltSent="
                         << tiltServoCommand
-                        << " ErrorX="
+                        << " ErrX="
                         << errorX
-                        << " ErrorY="
+                        << " ErrY="
                         << errorY
-                        << " PanVel="
-                        << panVelocity
-                        << " TiltVel="
-                        << tiltVelocity
-                        << " Conf="
-                        << targetConfidence
+                        << " TargetVx="
+                        << panPredictiveState.targetImageVelocity
+                        << " TargetVy="
+                        << tiltPredictiveState.targetImageVelocity
+                        << " PanModelV="
+                        << panPredictiveState.modelVelocity
+                        << " TiltModelV="
+                        << tiltPredictiveState.modelVelocity
+                        << " MPCPan="
+                        << desiredPanVelocity
+                        << " MPCTilt="
+                        << desiredTiltVelocity
+                        << " Hold="
+                        << (
+                            stationaryHold
+                            ? "YES"
+                            : "NO"
+                        )
                         << '\n';
-
-                    previousErrorX =
-                        errorX;
-
-                    previousErrorY =
-                        errorY;
                 }
             }
         }
@@ -1194,6 +1643,9 @@ int main()
 
             panTrackingActive = false;
             tiltTrackingActive = false;
+
+            stationaryHold = false;
+            stationaryHoldCounter = 0;
 
             // Reset control timing while the face is missing.
             // Otherwise dt keeps growing and the first detection can jump
@@ -1224,6 +1676,12 @@ int main()
 
                 filteredDerivativeX = 0.0f;
                 filteredDerivativeY = 0.0f;
+
+                panPredictiveState.initialized = false;
+                tiltPredictiveState.initialized = false;
+
+                panPredictiveState.delayQueue.clear();
+                tiltPredictiveState.delayQueue.clear();
             }
         }
 
@@ -1284,7 +1742,7 @@ int main()
         std::string modeText =
             manualMode
             ? "MANUAL | WASD | R smooth center | M auto"
-            : "AUTO PID | M manual";
+            : "AUTO MPC | M manual";
 
         cv::putText(
             frame,
@@ -1330,6 +1788,15 @@ int main()
             panTrackingActive = false;
             tiltTrackingActive = false;
 
+            stationaryHold = false;
+            stationaryHoldCounter = 0;
+
+            panPredictiveState.initialized = false;
+            tiltPredictiveState.initialized = false;
+
+            panPredictiveState.delayQueue.clear();
+            tiltPredictiveState.delayQueue.clear();
+
             previousControlTime =
                 std::chrono::steady_clock::now();
 
@@ -1337,7 +1804,7 @@ int main()
                 << (
                     manualMode
                     ? "MANUAL MODE\n"
-                    : "AUTO PID MODE\n"
+                    : "AUTO MPC MODE\n"
                 );
         }
 
@@ -1360,6 +1827,12 @@ int main()
             pidInitialized = false;
             integralX = 0.0f;
             integralY = 0.0f;
+
+            panPredictiveState.initialized = false;
+            tiltPredictiveState.initialized = false;
+
+            panPredictiveState.delayQueue.clear();
+            tiltPredictiveState.delayQueue.clear();
 
             previousResetTime =
                 std::chrono::steady_clock::now();
@@ -1464,7 +1937,7 @@ int main()
                         float difference =
                             target -
                             current;
-
+                        
                         if (
                             std::abs(difference) <=
                             maximumStep
