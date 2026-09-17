@@ -1,6 +1,9 @@
 # AI Pan Tilt Face Tracker
 
 A real time two axis vision tracking system that detects and follows a specific face using a custom YOLO model, C++, OpenCV, model predictive control, and Arduino controlled pan and tilt servos.
+## Demo
+
+[Watch the full face tracking demo](demo/tracker_demo.mp4)
 
 The system combines computer vision, target motion estimation, feedback control, and embedded hardware to keep a detected face near the center of the camera frame while reducing overshoot, jitter, and unnecessary servo movement.
 
