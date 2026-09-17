@@ -8,24 +8,44 @@
 #include <thread>
 #include <chrono>
 #include <limits>
+#include <sstream>
+#include <iomanip>
 #include "serial/serial.h"
 
 void sendServoCommand(
     serial::Serial& arduino,
-    int panAngle,
-    int tiltAngle,
-    int& previousPanAngle,
-    int& previousTiltAngle)
+    float panAngle,
+    float tiltAngle,
+    float& previousPanAngle,
+    float& previousTiltAngle)
 {
-    if (panAngle == previousPanAngle &&
-        tiltAngle == previousTiltAngle)
+    // Send sub-degree commands. This removes the 1-degree staircase
+    // that can make a hobby servo sit still and then suddenly jump.
+    constexpr float minimumCommandChange = 0.05f;
+
+    if (
+        std::isfinite(previousPanAngle) &&
+        std::isfinite(previousTiltAngle) &&
+        std::abs(panAngle - previousPanAngle) <
+            minimumCommandChange &&
+        std::abs(tiltAngle - previousTiltAngle) <
+            minimumCommandChange
+    )
+    {
         return;
+    }
 
-    std::string command =
-        std::to_string(panAngle) + "," +
-        std::to_string(tiltAngle) + "\n";
+    std::ostringstream command;
 
-    arduino.write(command);
+    command
+        << std::fixed
+        << std::setprecision(2)
+        << panAngle
+        << ","
+        << tiltAngle
+        << "\n";
+
+    arduino.write(command.str());
 
     previousPanAngle = panAngle;
     previousTiltAngle = tiltAngle;
@@ -66,9 +86,11 @@ int main()
     // ARDUINO
     serial::Serial arduino;
 
+    const std::string arduinoPort = "COM7";
+
     try
     {
-        arduino.setPort("COM7");
+        arduino.setPort(arduinoPort);
         arduino.setBaudrate(115200);
 
         serial::Timeout timeout =
@@ -93,7 +115,7 @@ int main()
         return 1;
     }
 
-    std::cout << "Arduino connected on COM7.\n";
+    std::cout << "Arduino connected on " << arduinoPort << ".\n";
 
     std::this_thread::sleep_for(
         std::chrono::seconds(2)
@@ -107,27 +129,35 @@ int main()
     constexpr float nmsThreshold = 0.45f;
 
     // FACE POSITION SMOOTHING
-    constexpr float smoothingAlpha = 0.10f;
+    constexpr float smoothingAlpha = 0.07f;
 
     float smoothedFaceX = 0.0f;
     float smoothedFaceY = 0.0f;
 
     bool haveSmoothedTarget = false;
 
-    // DEAD ZONE
-    constexpr float deadZone = 30.0f;
+    // TRACKING HYSTERESIS
+    // The axis starts moving only when the error is clearly outside center,
+    // then stops only after it gets much closer to center.
+    // This prevents stationary face noise from making the servos hunt.
+    constexpr float panStartError = 45.0f;
+    constexpr float panStopError = 18.0f;
+
+    constexpr float tiltStartError = 40.0f;
+    constexpr float tiltStopError = 15.0f;
+
+    bool panTrackingActive = false;
+    bool tiltTrackingActive = false;
 
     // PID GAINS
-    // Kp reacts to current face-position error.
-    // Ki removes small persistent offsets.
-    // Kd damps motion and reacts to how quickly the error is changing.
-    float panKp = 0.030f;
-    float panKi = 0.0005f;
-    float panKd = 0.003f;
+    // Pan is tuned separately because this axis was sluggish/occasionally reversed.
+    float panKp = 0.022f;
+    float panKi = 0.0015f;
+    float panKd = 0.0020f;
 
-    float tiltKp = 0.030f;
-    float tiltKi = 0.0005f;
-    float tiltKd = 0.003f;
+    float tiltKp = 0.024f;
+    float tiltKi = 0.0020f;
+    float tiltKd = 0.0030f;
 
     // PID STATE
     float previousErrorX = 0.0f;
@@ -145,16 +175,31 @@ int main()
     constexpr float derivativeAlpha = 0.20f;
 
     // SERVO COMMANDS
+    // panCommand / tiltCommand are the continuous PID targets.
+    // panServoCommand / tiltServoCommand are what is actually sent.
     float panCommand = 90.0f;
     float tiltCommand = 90.0f;
+
+    float panServoCommand = 90.0f;
+    float tiltServoCommand = 90.0f;
+
+    // SHARED DUAL-AXIS OUTPUT CLOCK
+    // Pan keeps its 2-degree mechanical stepping.
+    // Tilt keeps its smooth continuous PID command.
+    // Both are sent together on the same 50 ms output tick.
+    constexpr float panStepDegrees = 2.0f;
+    constexpr int sharedOutputIntervalMs = 50;
+
+    auto previousCoordinatedStepTime =
+        std::chrono::steady_clock::now();
 
     // SERVO VELOCITIES
     float panVelocity = 0.0f;
     float tiltVelocity = 0.0f;
 
     // MOTION LIMITS
-    constexpr float maximumVelocity = 35.0f;
-    constexpr float maximumAcceleration = 100.0f;
+    constexpr float maximumVelocity = 18.0f;
+    constexpr float maximumAcceleration = 45.0f;
 
     // SAFE SERVO LIMITS
     constexpr float panMinimum = 15.0f;
@@ -174,14 +219,26 @@ int main()
 
     constexpr float manualServoStep = 2.0f;
 
+    // SMOOTH CENTER RESET
+    bool smoothResetActive = false;
+    constexpr float resetPanTarget = 90.0f;
+    constexpr float resetTiltTarget = 90.0f;
+    constexpr float resetSpeed = 10.0f; // degrees per second
+
+    auto previousResetTime =
+        std::chrono::steady_clock::now();
+
     // TARGET LOSS
     int lostFrames = 0;
 
     constexpr int resetAfterLostFrames = 10;
 
     // PREVIOUS SERVO COMMANDS
-    int previousPanAngle = -1;
-    int previousTiltAngle = -1;
+    float previousPanAngle =
+        std::numeric_limits<float>::quiet_NaN();
+
+    float previousTiltAngle =
+        std::numeric_limits<float>::quiet_NaN();
 
     bool printedOutputShape = false;
 
@@ -454,18 +511,18 @@ int main()
             frame,
             cv::Point(
                 frameCenterX -
-                    static_cast<int>(deadZone),
+                    static_cast<int>(panStopError),
 
                 frameCenterY -
-                    static_cast<int>(deadZone)
+                    static_cast<int>(tiltStopError)
             ),
 
             cv::Point(
                 frameCenterX +
-                    static_cast<int>(deadZone),
+                    static_cast<int>(panStopError),
 
                 frameCenterY +
-                    static_cast<int>(deadZone)
+                    static_cast<int>(tiltStopError)
             ),
 
             cv::Scalar(255, 255, 0),
@@ -677,8 +734,14 @@ int main()
                     previousControlTime =
                         now;
 
-                    if (dt <= 0.0f)
-                        dt = 0.001f;
+                    // Prevent a long pause / lost target from producing
+                    // one huge control step when the face is detected again.
+                    dt =
+                        std::clamp(
+                            dt,
+                            0.001f,
+                            0.10f
+                        );
 
                     float errorX =
                         static_cast<float>(
@@ -692,14 +755,44 @@ int main()
                             frameCenterY
                         );
 
-                    // DEAD ZONE
-                    if (std::abs(errorX) < deadZone)
+                    // HYSTERESIS
+                    // Do not continuously switch between moving/stopping when
+                    // the detected face jitters by a few pixels.
+                    float absoluteErrorX =
+                        std::abs(errorX);
+
+                    float absoluteErrorY =
+                        std::abs(errorY);
+
+                    if (panTrackingActive)
+                    {
+                        if (absoluteErrorX <= panStopError)
+                            panTrackingActive = false;
+                    }
+                    else
+                    {
+                        if (absoluteErrorX >= panStartError)
+                            panTrackingActive = true;
+                    }
+
+                    if (tiltTrackingActive)
+                    {
+                        if (absoluteErrorY <= tiltStopError)
+                            tiltTrackingActive = false;
+                    }
+                    else
+                    {
+                        if (absoluteErrorY >= tiltStartError)
+                            tiltTrackingActive = true;
+                    }
+
+                    if (!panTrackingActive)
                     {
                         errorX = 0.0f;
                         integralX = 0.0f;
                     }
 
-                    if (std::abs(errorY) < deadZone)
+                    if (!tiltTrackingActive)
                     {
                         errorY = 0.0f;
                         integralY = 0.0f;
@@ -768,23 +861,115 @@ int main()
                         );
 
                     // PID OUTPUT = DESIRED SERVO VELOCITY
-                    float desiredPanVelocity =
-                        panKp * errorX +
-                        panKi * integralX +
+
+                    // PAN PID
+                    // Physical mapping confirmed:
+                    // increasing pan angle = camera RIGHT
+                    // decreasing pan angle = camera LEFT
+                    float panP =
+                        panKp * errorX;
+
+                    // Integral removes a persistent centering error, but
+                    // cap its contribution so it cannot wind up and cause hunting.
+                    float panI =
+                        std::clamp(
+                            panKi * integralX,
+                            -0.75f,
+                            0.75f
+                        );
+
+                    float panD =
                         panKd *
                         filteredDerivativeX;
 
-                    float desiredTiltVelocity =
-                        tiltKp * errorY +
-                        tiltKi * integralY +
+                    // Keep D as damping only. Do not let a noisy derivative
+                    // overpower P and reverse the desired pan direction.
+                    float maximumPanD =
+                        std::abs(panP) * 0.50f;
+
+                    panD =
+                        std::clamp(
+                            panD,
+                            -maximumPanD,
+                            maximumPanD
+                        );
+
+                    float desiredPanVelocity =
+                        panP +
+                        panI +
+                        panD;
+
+                    // TILT PID
+                    float tiltP =
+                        tiltKp * errorY;
+
+                    float tiltI =
+                        std::clamp(
+                            tiltKi * integralY,
+                            -1.20f,
+                            1.20f
+                        );
+
+                    float tiltD =
                         tiltKd *
                         filteredDerivativeY;
 
-                    // HARDWARE DIRECTION:
-                    // Increasing pan angle moves the camera RIGHT.
-                    // Increasing tilt angle moves the camera DOWN.
-                    // Therefore positive image error should produce
-                    // positive servo velocity on both axes.
+                    // Keep tilt derivative from overpowering the direction
+                    // set by the proportional term.
+                    float maximumTiltD =
+                        std::abs(tiltP) * 0.50f;
+
+                    tiltD =
+                        std::clamp(
+                            tiltD,
+                            -maximumTiltD,
+                            maximumTiltD
+                        );
+
+                    float desiredTiltVelocity =
+                        tiltP +
+                        tiltI +
+                        tiltD;
+
+                    // PHYSICAL DIRECTION CORRECTION:
+                    // Pan is physically reversed, so invert pan.
+                    // Tilt is NOT reversed:
+                    // face below center -> positive errorY -> increase tilt angle -> camera DOWN
+                    desiredPanVelocity =
+                        -desiredPanVelocity;
+
+                    // Use only a very small minimum velocity. The integral
+                    // term can now build gently against persistent error instead
+                    // of forcing a large sudden kick.
+                    constexpr float minimumPanVelocity = 1.0f;
+
+                    if (
+                        errorX != 0.0f &&
+                        std::abs(desiredPanVelocity) <
+                            minimumPanVelocity
+                    )
+                    {
+                        desiredPanVelocity =
+                            errorX > 0.0f
+                            ? -minimumPanVelocity
+                            : minimumPanVelocity;
+                    }
+
+                    // Small minimum tilt velocity only. Integral action
+                    // handles persistent offset without aggressive hunting.
+                    constexpr float minimumTiltVelocity = 0.8f;
+
+                    if (
+                        errorY != 0.0f &&
+                        std::abs(desiredTiltVelocity) <
+                            minimumTiltVelocity
+                    )
+                    {
+                        desiredTiltVelocity =
+                            errorY > 0.0f
+                            ? minimumTiltVelocity
+                            : -minimumTiltVelocity;
+                    }
 
                     // MAXIMUM SPEED
                     desiredPanVelocity =
@@ -837,13 +1022,13 @@ int main()
                     // IF CENTERED, SLOW TO A STOP
                     if (errorX == 0.0f)
                     {
-                        panVelocity *= 0.70f;
+                        panVelocity *= 0.45f;
 
                         if (
                             std::abs(
                                 panVelocity
                             ) <
-                            0.5f
+                            0.25f
                         )
                         {
                             panVelocity = 0.0f;
@@ -852,13 +1037,13 @@ int main()
 
                     if (errorY == 0.0f)
                     {
-                        tiltVelocity *= 0.70f;
+                        tiltVelocity *= 0.40f;
 
                         if (
                             std::abs(
                                 tiltVelocity
                             ) <
-                            0.5f
+                            0.25f
                         )
                         {
                             tiltVelocity = 0.0f;
@@ -902,33 +1087,87 @@ int main()
                     if (tiltCommand != unclampedTilt)
                         tiltVelocity = 0.0f;
 
-                    int panAngle =
-                        static_cast<int>(
-                            std::round(
-                                panCommand
-                            )
-                        );
+                    // SHARED OUTPUT UPDATE
+                    // Do NOT scale tilt by pan error. That made tilt weak whenever
+                    // pan had the larger error. Pan is stepped for the mechanics,
+                    // while tilt follows its already-smoothed PID target directly.
+                    auto coordinatedNow =
+                        std::chrono::steady_clock::now();
 
-                    int tiltAngle =
-                        static_cast<int>(
-                            std::round(
-                                tiltCommand
-                            )
-                        );
+                    auto coordinatedElapsedMs =
+                        std::chrono::duration_cast<
+                            std::chrono::milliseconds
+                        >(
+                            coordinatedNow -
+                            previousCoordinatedStepTime
+                        ).count();
 
-                    sendServoCommand(
-                        arduino,
-                        panAngle,
-                        tiltAngle,
-                        previousPanAngle,
-                        previousTiltAngle
-                    );
+                    if (
+                        coordinatedElapsedMs >=
+                            sharedOutputIntervalMs
+                    )
+                    {
+                        float panDifference =
+                            panCommand -
+                            panServoCommand;
+
+                        if (
+                            std::abs(panDifference) >=
+                                0.05f
+                        )
+                        {
+                            float panStep =
+                                std::clamp(
+                                    panDifference,
+                                    -panStepDegrees,
+                                    panStepDegrees
+                                );
+
+                            panServoCommand +=
+                                panStep;
+
+                            panServoCommand =
+                                std::clamp(
+                                    panServoCommand,
+                                    panMinimum,
+                                    panMaximum
+                                );
+                        }
+
+                        // Preserve the good tilt behavior from the earlier
+                        // version. tiltCommand is already velocity/acceleration
+                        // limited by the PID controller, so no extra stepping
+                        // or proportional scaling is needed here.
+                        tiltServoCommand =
+                            std::clamp(
+                                tiltCommand,
+                                tiltMinimum,
+                                tiltMaximum
+                            );
+
+                        previousCoordinatedStepTime =
+                            coordinatedNow;
+
+                        sendServoCommand(
+                            arduino,
+                            panServoCommand,
+                            tiltServoCommand,
+                            previousPanAngle,
+                            previousTiltAngle
+                        );
+                    }
 
                     std::cout
-                        << "Pan="
-                        << panAngle
-                        << " Tilt="
-                        << tiltAngle
+                        << std::fixed
+                        << std::setprecision(2)
+                        << "PanTarget="
+                        << panCommand
+                        << " PanSent="
+                        << panServoCommand
+                        << " TiltTarget="
+                        << tiltCommand
+                        << " TiltSent="
+                        << tiltServoCommand
                         << " ErrorX="
                         << errorX
                         << " ErrorY="
@@ -953,9 +1192,18 @@ int main()
         {
             lostFrames++;
 
+            panTrackingActive = false;
+            tiltTrackingActive = false;
+
+            // Reset control timing while the face is missing.
+            // Otherwise dt keeps growing and the first detection can jump
+            // straight to a servo hard limit.
+            previousControlTime =
+                std::chrono::steady_clock::now();
+
             // GRADUALLY STOP IF FACE IS LOST
-            panVelocity *= 0.70f;
-            tiltVelocity *= 0.70f;
+            panVelocity *= 0.45f;
+            tiltVelocity *= 0.40f;
 
             if (std::abs(panVelocity) < 0.5f)
                 panVelocity = 0.0f;
@@ -983,14 +1231,14 @@ int main()
         int displayedPan =
             static_cast<int>(
                 std::round(
-                    panCommand
+                    panServoCommand
                 )
             );
 
         int displayedTilt =
             static_cast<int>(
                 std::round(
-                    tiltCommand
+                    tiltServoCommand
                 )
             );
 
@@ -1035,7 +1283,7 @@ int main()
 
         std::string modeText =
             manualMode
-            ? "MANUAL | W up S down A left D right | R center | M auto"
+            ? "MANUAL | WASD | R smooth center | M auto"
             : "AUTO PID | M manual";
 
         cv::putText(
@@ -1070,10 +1318,20 @@ int main()
             panVelocity = 0.0f;
             tiltVelocity = 0.0f;
 
+            // Start from the actual positions that were last sent.
+            panCommand = panServoCommand;
+            tiltCommand = tiltServoCommand;
+
             pidInitialized = false;
 
             integralX = 0.0f;
             integralY = 0.0f;
+
+            panTrackingActive = false;
+            tiltTrackingActive = false;
+
+            previousControlTime =
+                std::chrono::steady_clock::now();
 
             std::cout
                 << (
@@ -1081,6 +1339,33 @@ int main()
                     ? "MANUAL MODE\n"
                     : "AUTO PID MODE\n"
                 );
+        }
+
+        // R = smoothly return both axes to center.
+        // Switch to manual so AUTO does not fight the reset.
+        if (
+            key == 'r' ||
+            key == 'R'
+        )
+        {
+            manualMode = true;
+            smoothResetActive = true;
+
+            panVelocity = 0.0f;
+            tiltVelocity = 0.0f;
+
+            panCommand = panServoCommand;
+            tiltCommand = tiltServoCommand;
+
+            pidInitialized = false;
+            integralX = 0.0f;
+            integralY = 0.0f;
+
+            previousResetTime =
+                std::chrono::steady_clock::now();
+
+            std::cout
+                << "SMOOTH RESET STARTED\n";
         }
 
         // MANUAL MODE
@@ -1093,9 +1378,10 @@ int main()
                 key == 'W'
             )
             {
+                smoothResetActive = false;
+
                 // W = camera UP
-                // S = camera DOWN
-                tiltCommand +=
+                tiltCommand -=
                     manualServoStep;
 
                 changed = true;
@@ -1106,7 +1392,10 @@ int main()
                 key == 'S'
             )
             {
-                tiltCommand -=
+                smoothResetActive = false;
+
+                // S = camera DOWN
+                tiltCommand +=
                     manualServoStep;
 
                 changed = true;
@@ -1117,9 +1406,10 @@ int main()
                 key == 'A'
             )
             {
+                smoothResetActive = false;
+
                 // A = camera LEFT
-                // D = camera RIGHT
-                panCommand +=
+                panCommand -=
                     manualServoStep;
 
                 changed = true;
@@ -1130,21 +1420,105 @@ int main()
                 key == 'D'
             )
             {
-                panCommand -=
+                smoothResetActive = false;
+
+                // D = camera RIGHT
+                panCommand +=
                     manualServoStep;
 
                 changed = true;
             }
 
-            if (
-                key == 'r' ||
-                key == 'R'
-            )
+            if (smoothResetActive)
             {
-                panCommand = 90.0f;
-                tiltCommand = 90.0f;
+                auto resetNow =
+                    std::chrono::steady_clock::now();
 
-                changed = true;
+                float resetDt =
+                    std::chrono::duration<float>(
+                        resetNow -
+                        previousResetTime
+                    ).count();
+
+                previousResetTime =
+                    resetNow;
+
+                resetDt =
+                    std::clamp(
+                        resetDt,
+                        0.0f,
+                        0.05f
+                    );
+
+                float maximumResetStep =
+                    resetSpeed *
+                    resetDt;
+
+                auto moveToward =
+                    [](
+                        float current,
+                        float target,
+                        float maximumStep
+                    )
+                    {
+                        float difference =
+                            target -
+                            current;
+
+                        if (
+                            std::abs(difference) <=
+                            maximumStep
+                        )
+                        {
+                            return target;
+                        }
+
+                        return current +
+                            (
+                                difference > 0.0f
+                                ? maximumStep
+                                : -maximumStep
+                            );
+                    };
+
+                float oldPan =
+                    panCommand;
+
+                float oldTilt =
+                    tiltCommand;
+
+                panCommand =
+                    moveToward(
+                        panCommand,
+                        resetPanTarget,
+                        maximumResetStep
+                    );
+
+                tiltCommand =
+                    moveToward(
+                        tiltCommand,
+                        resetTiltTarget,
+                        maximumResetStep
+                    );
+
+                if (
+                    panCommand != oldPan ||
+                    tiltCommand != oldTilt
+                )
+                {
+                    changed = true;
+                }
+
+                if (
+                    panCommand == resetPanTarget &&
+                    tiltCommand == resetTiltTarget
+                )
+                {
+                    smoothResetActive = false;
+
+                    std::cout
+                        << "SMOOTH RESET COMPLETE\n";
+                }
             }
 
             panCommand =
@@ -1163,33 +1537,31 @@ int main()
 
             if (changed)
             {
-                int panAngle =
-                    static_cast<int>(
-                        std::round(
-                            panCommand
-                        )
-                    );
+                // Manual commands update both actual outputs immediately.
+                panServoCommand =
+                    panCommand;
 
-                int tiltAngle =
-                    static_cast<int>(
-                        std::round(
-                            tiltCommand
-                        )
-                    );
+                tiltServoCommand =
+                    tiltCommand;
+
+                previousCoordinatedStepTime =
+                    std::chrono::steady_clock::now();
 
                 sendServoCommand(
                     arduino,
-                    panAngle,
-                    tiltAngle,
+                    panServoCommand,
+                    tiltServoCommand,
                     previousPanAngle,
                     previousTiltAngle
                 );
 
                 std::cout
-                    << "MANUAL Pan="
-                    << panAngle
-                    << " Tilt="
-                    << tiltAngle
+                    << std::fixed
+                    << std::setprecision(2)
+                    << "MANUAL PanSent="
+                    << panServoCommand
+                    << " TiltSent="
+                    << tiltServoCommand
                     << '\n';
             }
         }
