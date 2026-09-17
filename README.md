@@ -1,211 +1,391 @@
-# Robotic Webcam Face Tracker
+# AI Pan Tilt Face Tracker
 
-A 2-axis robotic webcam platform that detects a face in real time and physically pans and tilts a Logitech C270 to keep the target centered.
+A real time two axis vision tracking system that detects and follows a specific face using a custom YOLO model, C++, OpenCV, model predictive control, and Arduino controlled pan and tilt servos.
 
-The project combines **C++**, **OpenCV DNN**, a custom **YOLO ONNX model**, **Arduino**, **serial communication**, **SG90 servos**, and a custom **3D-printed pan-tilt mechanism** designed in CAD.
+The system combines computer vision, target motion estimation, feedback control, and embedded hardware to keep a detected face near the center of the camera frame while reducing overshoot, jitter, and unnecessary servo movement.
 
-## What it does
+## Overview
 
-- Captures live video from an external webcam with OpenCV
-- Runs a custom YOLO model for face detection
-- Tracks the detected face center relative to the center of the frame
-- Smooths noisy detections before commanding the servos
-- Uses proportional control, a dead zone, and limited servo step size to reduce jitter
-- Sends pan and tilt commands from the PC to an Arduino over serial at 115200 baud
-- Supports both automatic tracking and manual keyboard control
-- Includes the latest Revision M mechanical design and 3D-printable parts
+A webcam continuously captures video while a custom YOLO ONNX model detects the target face.
 
-## System overview
+The software measures the target's position relative to the center of the image and estimates its movement across the frame. Independent predictive controllers for the pan and tilt axes then determine how the camera should move.
+
+Instead of reacting only to the current image error, the controller predicts how the target and camera are expected to move over the next several control steps.
+
+The resulting commands are transmitted over serial to an Arduino controlling the two servo motors.
+
+## System Pipeline
 
 ```text
-Logitech C270
-     |
-     v
-OpenCV video capture
-     |
-     v
-YOLO face detection
-     |
-     v
-Smoothed face position
-     |
-     v
-Pan/Tilt controller
-     |
-     v
-USB serial
-     |
-     v
-Arduino Uno
-   /     \
-  v       v
-Pan SG90  Tilt SG90
-     \   /
-      v v
-3D-printed pan-tilt mount
+Webcam
+   |
+   v
+Camera Frame
+   |
+   v
+Image Preprocessing and Letterboxing
+   |
+   v
+Custom YOLO Face Detector
+   |
+   v
+Non Maximum Suppression
+   |
+   v
+Target Selection and Tracking
+   |
+   v
+Face Position Smoothing
+   |
+   v
+Image Error Calculation
+   |
+   v
+Target Motion Observer
+   |
+   +----------------------+
+   |                      |
+   v                      v
+Target Velocity      Servo Motion Model
+   |                      |
+   +-----------+----------+
+               |
+               v
+       Future Motion Prediction
+               |
+        +------+------+
+        |             |
+        v             v
+     Pan MPC       Tilt MPC
+        |             |
+        +------+------+
+               |
+               v
+     Velocity and Acceleration
+             Limits
+               |
+               v
+       Servo Angle Commands
+               |
+               v
+            Arduino
+          /         \
+         v           v
+    Pan Servo    Tilt Servo
 ```
+
+## Features
+
+### Custom Face Detection
+
+The tracker uses a custom YOLO model exported to ONNX and executed through OpenCV DNN.
+
+The detector runs on a letterboxed 640 × 640 image while preserving the original camera aspect ratio.
+
+Detections below the confidence threshold are rejected and Non Maximum Suppression is used to remove overlapping detections.
+
+### Target Association
+
+When tracking begins, the highest confidence detection is selected.
+
+Once a target has been established, subsequent detections are compared with the previous smoothed target position. The closest detection is selected to reduce unnecessary switching between detected objects.
+
+### Target Position Smoothing
+
+Raw bounding box positions from the detector can change slightly even when the target is stationary.
+
+An exponential smoothing filter is applied to the detected face center before the position is used by the controller.
+
+This reduces camera movement caused by small detection fluctuations.
+
+### Predictive Motion Estimation
+
+The tracker estimates the image velocity of the target from consecutive measurements.
+
+The observer also estimates how much apparent image motion is being produced by movement of the camera itself.
+
+Conceptually,
+
+```text
+Target Image Velocity =
+Observed Image Velocity
+-
+Camera Induced Image Velocity
+```
+
+This helps distinguish actual target motion from image movement caused by the pan and tilt servos.
+
+### Model Predictive Control
+
+Automatic tracking uses independent predictive controllers for the pan and tilt axes.
+
+For each control cycle, the controller evaluates a range of possible servo velocity commands and simulates their effect over a future prediction horizon.
+
+Each candidate command is scored using a cost function that considers
+
+```text
+Tracking error
+Control effort
+Change in control command
+Terminal tracking error
+```
+
+The command producing the lowest predicted cost is selected.
+
+This allows the system to react not only to where the target currently is, but also to where it is moving.
+
+### Servo Dynamics Model
+
+The predictive controller contains a simplified first order model of each servo axis.
+
+The model includes
+
+```text
+Servo response time
+Command gain
+Estimated control delay
+Pixels of image movement per degree of camera rotation
+Maximum servo velocity
+Maximum servo acceleration
+```
+
+Pan and tilt are modeled separately because the mechanical response of the two axes is different.
+
+The current model parameters are initial estimates and are intended to be refined using experimental measurements.
+
+### Delay Compensation
+
+Camera processing, neural network inference, serial communication, and servo movement introduce delay.
+
+The controller maintains a queue of previous commands to approximate this delay when predicting future system behavior.
+
+This prevents the controller from assuming that a newly issued servo command affects the camera immediately.
+
+### Predictive Tracking Activation
+
+Tracking does not depend only on position error.
+
+The system also considers estimated target velocity.
+
+If a target begins moving quickly, tracking can activate before the target moves far from the center of the image.
+
+This improves response to moving targets compared with a purely position based dead zone.
+
+### Tracking Hysteresis
+
+Different thresholds are used for starting and stopping movement.
+
+For example, the pan axis requires a larger error to begin tracking than it requires to stop tracking.
+
+This prevents rapid switching between moving and stopping when the target is close to the center of the frame.
+
+### Stationary Hold
+
+When the target remains close to the image center and nearly motionless for several consecutive control cycles, the tracker enters a stationary hold state.
+
+During stationary hold
+
+```text
+Pan velocity is set to zero
+Tilt velocity is set to zero
+Predictive velocity states are reset
+Servo targets are synchronized with the physical servo commands
+```
+
+The hold is released immediately when the target moves far enough or fast enough.
+
+This reduces continuous servo hunting caused by small camera and detector fluctuations.
+
+### Motion Constraints
+
+Servo motion is limited by both velocity and acceleration constraints.
+
+Current software limits are approximately
+
+```text
+Maximum velocity:      18 degrees per second
+Maximum acceleration:  45 degrees per second squared
+```
+
+These limits help produce smoother physical movement and prevent aggressive controller commands.
+
+### Servo Safety Limits
+
+Software limits prevent the mechanism from commanding unsafe angles.
+
+```text
+Pan:   15 to 165 degrees
+Tilt:  60 to 120 degrees
+```
+
+### Target Loss Handling
+
+When the face is temporarily lost, servo velocities are gradually reduced instead of stopping abruptly.
+
+After the target has been missing for several frames, the tracking and prediction states are reset.
+
+This prevents stale target information from affecting the next detection.
+
+### Manual Control
+
+The tracker can be switched between automatic MPC tracking and manual control.
+
+```text
+M     Toggle automatic and manual mode
+
+W     Tilt camera up
+S     Tilt camera down
+A     Pan camera left
+D     Pan camera right
+
+R     Smoothly return both axes to center
+
+Q     Quit
+ESC   Quit
+```
+
+### Smooth Center Reset
+
+Pressing `R` disables automatic tracking and gradually returns both axes to
+
+```text
+Pan:  90 degrees
+Tilt: 90 degrees
+```
+
+rather than immediately snapping the servos to their center positions.
+
+## Visual Debugging
+
+The OpenCV display includes
+
+```text
+Detected face bounding box
+Detection confidence
+Raw face center
+Smoothed face center
+Camera frame center
+Tracking dead zone
+Predicted future target position
+Current pan angle
+Current tilt angle
+Number of detections
+Current operating mode
+```
+
+The predicted target location is displayed separately from the current target location so the motion observer can be inspected visually.
+
+## Controller Debug Output
+
+The application also prints controller information to the terminal, including
+
+```text
+Pan target angle
+Pan angle sent to Arduino
+Tilt target angle
+Tilt angle sent to Arduino
+Horizontal image error
+Vertical image error
+Estimated target velocity
+Estimated camera velocity
+MPC pan command
+MPC tilt command
+Stationary hold status
+```
+
+This information can be recorded during testing and used to tune the predictive model.
 
 ## Hardware
 
-- Arduino Uno
-- Logitech C270 webcam
-- 2x SG90 micro servos
-- 3D-printed Revision M pan-tilt assembly
-- USB connection for the webcam
-- USB connection for the Arduino
-- Regulated 5 V servo power supply recommended for reliable operation
+The system is designed around
 
-### Servo wiring
+```text
+Webcam
+Arduino
+Two axis pan tilt mechanism
+Two servo motors
+Computer running the C++ vision and control application
+```
 
-| Function | Arduino pin |
-| --- | --- |
-| Pan servo signal | D9 |
-| Tilt servo signal | D10 |
-| Servo ground | Common GND |
-| Servo power | 5 V regulated supply |
-
-The Arduino ground and external servo-power ground must be connected together.
+The computer performs neural network inference and predictive control while the Arduino receives pan and tilt angle commands and drives the physical servos.
 
 ## Software
 
-### PC tracker
-
-`Camera.cpp` handles:
-
-- Camera capture through OpenCV
-- Letterboxing to 640 x 640 for YOLO inference
-- ONNX inference through `cv::dnn`
-- Confidence filtering and non-maximum suppression
-- Exponential smoothing of the detected face position
-- Pan and tilt control
-- Serial communication with the Arduino
-- Automatic and manual operating modes
-
-Current controller values are tuned for smoother movement:
+The project uses
 
 ```text
-Confidence threshold: 0.40
-Dead zone:            50 px
-Pan Kp:               0.015
-Tilt Kp:              0.015
-Maximum servo step:   2 degrees
-Smoothing alpha:      0.15
-Servo update period:  50 ms
+C++
+OpenCV
+OpenCV DNN
+ONNX
+YOLO
+Serial communication
+Arduino
+Model Predictive Control
 ```
 
-### Arduino controller
+## Communication
 
-`Arduino_Camera_Tracker.ino` receives commands in this format:
+The computer communicates with the Arduino through a serial connection at
+
+```text
+115200 baud
+```
+
+Servo commands are transmitted using the format
 
 ```text
 panAngle,tiltAngle
 ```
 
-For example:
+For example
 
 ```text
-92,88
+92.35,87.72
 ```
 
-The Arduino constrains each command to 0-180 degrees and writes the requested positions to the pan and tilt servos.
+The controller avoids transmitting another command when both servo angles have changed by less than a small threshold.
 
-## Manual controls
+## Current Control Configuration
 
-The tracker starts in automatic mode.
+The controller currently runs at approximately 20 Hz.
 
-| Key | Action |
-| --- | --- |
-| `M` | Toggle automatic/manual mode |
-| `W` / `S` | Tilt control |
-| `A` / `D` | Pan control |
-| `R` | Return pan and tilt to 90 degrees |
-| `Q` or `Esc` | Quit |
+The MPC prediction horizon contains 10 control steps, corresponding to roughly 0.5 seconds of predicted motion.
 
-Click the OpenCV camera window before using the keyboard controls so that it has focus.
+Pan and tilt use separate dynamic models and delay estimates.
 
-## Face model
+These values are currently starting estimates rather than experimentally identified plant parameters.
 
-The tracker is designed to use a custom single-person YOLO model exported to ONNX.
+## Current Development Direction
 
-The personal trained model is intentionally **not committed to this public repository**. By default, `Camera.cpp` expects a local file named:
+The next major control improvement is experimental system identification.
+
+Future testing can be used to measure
 
 ```text
-Jerison_face.onnx
+Actual servo response time
+Pan and tilt command delay
+Pixels per degree of camera movement
+Servo command gain
+Response differences across servo angles
 ```
 
-Place the model beside the executable or change the model path in `Camera.cpp`.
+These measurements can then replace the initial model estimates used by the predictive controller.
 
-The repository may also contain a base YOLO ONNX file used during development, but the personalized tracker uses the custom model above.
-
-## Mechanical design
-
-The current mechanical design is **Revision M**, located in:
+Additional future improvements include
 
 ```text
-C270_Robotic_Arm_RevM/
+Automatic controller parameter identification
+Performance logging and plotting
+Quantitative tracking error evaluation
+Improved target reacquisition
+Hardware specific servo calibration
+Higher performance inference
+More advanced coupled pan and tilt control
 ```
 
-Revision M includes:
+## Project Goal
 
-- A thicker 10 mm arm to reduce sideways flex
-- Direct access to the original servo shaft screws
-- A 27 x 15 mm retaining-cap opening
-- A side-mounted Logitech C270 cradle so the upper servo produces real camera tilt
-- Separate pan and tilt axes
-- Printable STL files and STEP assemblies
-- Assembly, wiring, motion, and engineering-check documentation
+The goal of this project is not simply to move a webcam toward a detected face.
 
-The base should be secured to a rigid work surface for reliable operation. The CAD package also documents expected servo travel, mechanical assumptions, and assembly details.
-
-## Repository structure
-
-```text
-Webcam-Tracker/
-|
-|-- Camera.cpp
-|   Main C++ vision and tracking application
-|
-|-- Arduino_Camera_Tracker.ino
-|   Arduino servo controller
-|
-|-- C270_Robotic_Arm_RevM/
-|   Latest CAD, STL, STEP, assembly, and documentation files
-|
-|-- yolov8n.onnx
-|   Base YOLO model used during development
-|
-|-- .gitignore
-|   Excludes build output, training data, and the personal face model
-|
-`-- README.md
-```
-
-## Running the project
-
-1. Connect the Arduino Uno by USB.
-2. Upload `Arduino_Camera_Tracker.ino` using the Arduino IDE.
-3. Connect the Logitech webcam to another USB port.
-4. Confirm the Arduino COM port in Windows Device Manager or the Arduino IDE.
-5. Update the COM port in `Camera.cpp` if necessary. The current source is configured for `COM7`.
-6. Confirm the external webcam index in `Camera.cpp`. The current source uses camera index `1`.
-7. Place the custom `Jerison_face.onnx` model in the program's working directory.
-8. Build the C++ application with OpenCV and the serial library linked.
-9. Run the tracker and click the camera window to use keyboard controls.
-
-## Dependencies
-
-- C++17-compatible compiler
-- OpenCV with DNN support
-- Arduino Servo library
-- `serial` C++ library for PC-to-Arduino communication
-- Arduino IDE for uploading the microcontroller firmware
-
-## Current development status
-
-The project has working camera capture, YOLO inference, serial communication, pan/tilt servo control, manual control, automatic tracking, smoothing, and a completed Revision M mechanical design.
-
-The main remaining work is control tuning and hardware refinement, particularly improving tracking smoothness, reducing mechanical jitter/backlash, and validating the final pan/tilt limits under the actual webcam load.
-
-## Why I built it
-
-I built this project to combine computer vision, embedded control, mechanical design, and real-time hardware integration in one system. It gave me hands-on experience moving from a trained vision model to a physical closed-loop robotic platform, including debugging camera selection, serial communication, servo behavior, mechanical stiffness, and tracking stability.
+It is to explore how computer vision, machine learning, state estimation, feedback control, and embedded hardware can be integrated into a complete real time robotic tracking system.
